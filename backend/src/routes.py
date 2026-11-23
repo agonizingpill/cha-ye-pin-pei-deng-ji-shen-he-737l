@@ -6,7 +6,17 @@ from . import present, schemas as s, workflow as flow
 from .auth import actor, issue, matches, permits
 from .constants import ReviewState as State, Role
 from .db import get_db
-from .models import Audit, BlendRecipe, GradeReview, RetainedSample, SensoryPanel, TeaLot, ThresholdPolicy, User
+from .models import (
+    Audit,
+    BlendRecipe,
+    GradeReview,
+    GradingOrder,
+    RetainedSample,
+    SensoryPanel,
+    TeaLot,
+    ThresholdPolicy,
+    User,
+)
 
 router = APIRouter()
 reader = Depends(actor)
@@ -83,6 +93,8 @@ def change_blend(key: int, data: s.RecipeInput, user: User = operator, db: Sessi
         raise HTTPException(403, '只有配方作者可以修订草稿')
     if row.reviews:
         raise HTTPException(409, '已送审的配方已经冻结，请另立配方')
+    if row.order_id:
+        raise HTTPException(409, '定级订单留料草稿的配比已锁定，不能直接修订；可撤销后重新试算')
     if row.code != data.code:
         raise HTTPException(409, '配方编号保持固定')
     flow.replace_shares(db, row, data)
@@ -91,6 +103,38 @@ def change_blend(key: int, data: s.RecipeInput, user: User = operator, db: Sessi
     flow.record(db, user, 'blend.revise', row.code, f'修订 v{row.revision} · {data.note}')
     db.commit()
     return present.recipe_out(row, db)
+
+
+@router.post('/blends/{key}/cancel', status_code=200)
+def cancel_blend(key: int, user: User = operator, db: Session = database):
+    row = flow.require(db, BlendRecipe, key, lock=True)
+    if row.author_id != user.id:
+        raise HTTPException(403, '只有配方作者可以撤销自己的草稿')
+    flow.cancel_recipe(db, user, row)
+    db.commit()
+    return present.recipe_out(row, db)
+
+
+@router.get('/orders')
+def orders(user: User = reader, db: Session = database):
+    rows = db.scalars(select(GradingOrder).order_by(GradingOrder.id.desc()))
+    return [present.order_out(row, db) for row in rows]
+
+
+@router.post('/orders/trial', status_code=201)
+def trial_order(data: s.OrderTrialInput, user: User = operator, db: Session = database):
+    """试算只产生达线建议或失败原因，不占用任何余料。"""
+    order = flow.trial_order(db, user, data)
+    db.commit()
+    return present.order_out(order, db)
+
+
+@router.post('/orders/{key}/confirm', status_code=201)
+def confirm_order(key: int, user: User = operator, db: Session = database):
+    """确认才留足各批用量并生成配方草稿；幂等，重复确认不重复占料或建草稿。"""
+    recipe = flow.confirm_order(db, user, key)
+    db.commit()
+    return present.recipe_out(recipe, db)
 
 
 @router.post('/blends/{key}/review', status_code=202)
@@ -155,6 +199,7 @@ def retain_blend(key: int, data: s.SampleInput, user: User = sealer, db: Session
     row = RetainedSample(review_id=key, sealed_by=user.id, **data.model_dump())
     review.state = State.SEALED
     db.add(row)
+    flow.consume_reservations(db, review, user)
     flow.record(db, user, 'sample.blend', key, f'{row.seal} · {row.cabinet} · {row.grams} g')
     db.commit()
     return present.sample_out(row)

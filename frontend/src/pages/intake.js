@@ -15,13 +15,19 @@ export function intake(root, id, refresh) {
   root.innerHTML = `${header('原料批次', '核对入库茶样的来源、净重与评审进度。', canEdit ?
     `<a class="button" href="#/lots/new">登记到货</a>` : '')}
     <div class="work-grid"><section class="paper ledger"><h2>到货茶样 <small>${store.lots.length} 个批次</small></h2>
-    ${store.lots.length ? `<div class="table-wrap"><table><thead><tr><th>批次 / 品种</th><th>来源</th><th>净重</th><th>可用性</th></tr></thead>
+    ${store.lots.length ? `<div class="table-wrap"><table><thead><tr><th>批次 / 品种</th><th>来源</th><th>净重</th><th>留料 / 可用</th><th>可用性</th></tr></thead>
       <tbody>${store.lots.map(row => `<tr class="${id !== 'new' && lot?.id === row.id ? 'chosen' : ''}">
       <td><a href="#/lots/${row.id}">${esc(row.cultivar)}</a><small>${esc(row.code)}</small></td>
-      <td>${esc(row.origin)}<small>${esc(row.roast)}</small></td><td>${esc(row.kilograms)} kg</td><td>${status(row.state)}</td></tr>`).join('')}
+      <td>${esc(row.origin)}<small>${esc(row.roast)}</small></td><td>${esc(row.kilograms)} kg</td>
+      <td><span class="held-kg">留 ${esc(row.held_kg)} kg</span><small>可用 ${esc(row.available_kg)} kg</small></td>
+      <td>${status(row.state)}</td></tr>`).join('')}
       </tbody></table></div>` : '<p class="empty">从登记一批到货原料开始。</p>'}</section>
     ${(id === 'new' || !lot) && canEdit ? form : lot ? `<aside class="paper side-ticket">
       <span class="mono">${esc(lot.code)}</span><h2>${esc(lot.cultivar)} · ${esc(lot.origin)}</h2><p>${esc(lot.received)} 到货，${esc(lot.roast)}</p>
+      <h3>余量台账</h3><ul class="stock-list">
+        <li><strong>到货净重</strong><span>${esc(lot.kilograms)} kg</span></li>
+        <li><strong>留料锁定</strong><span>${esc(lot.held_kg)} kg</span></li>
+        <li><strong>当前可用</strong><span>${esc(lot.available_kg)} kg</span></li></ul>
       <h3>最近感官评语</h3>${lot.panels[0] ? `<blockquote>${esc(lot.panels[0].note)}</blockquote>` : '<p>等待首轮冲泡评分。</p>'}
       <h3>原料留样</h3>${lot.sample ? shelfSample(lot.sample) : '<p>到货样尚未登记柜位和封签。</p>'}
       <div class="side-links"><a href="#/sensory/${lot.id}">查看审评单 →</a><a href="#/samples/lot-${lot.id}">查看留样 →</a></div></aside>` : ''}</div>`;

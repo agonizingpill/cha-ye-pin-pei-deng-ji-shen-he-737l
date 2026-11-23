@@ -57,6 +57,12 @@ class RecipeInput(BaseModel):
         return self
 
 
+class OrderTrialInput(BaseModel):
+    target_grade: Grade
+    kilograms: Decimal = Field(gt=0, max_digits=9, decimal_places=2)
+    note: Note
+
+
 class SampleInput(BaseModel):
     seal: Code
     grams: int = Field(ge=20, le=1000)

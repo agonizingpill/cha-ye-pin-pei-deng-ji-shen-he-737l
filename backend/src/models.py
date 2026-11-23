@@ -41,8 +41,10 @@ class BlendRecipe(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey('tea_user.id'))
     note: Mapped[str] = mapped_column(Text)
     revision: Mapped[int] = mapped_column(default=1)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey('grading_order.id'), unique=True)
     shares: Mapped[list['BlendShare']] = relationship(cascade='all, delete-orphan', order_by='BlendShare.lot_id')
     reviews: Mapped[list['GradeReview']] = relationship(order_by='GradeReview.id')
+    reservations: Mapped[list['LotReservation']] = relationship(back_populates='recipe')
 
 
 class BlendShare(Base):
@@ -52,6 +54,45 @@ class BlendShare(Base):
     percent: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     lot: Mapped[TeaLot] = relationship()
     __table_args__ = (CheckConstraint('percent > 0 AND percent <= 100'),)
+
+
+class GradingOrder(Base):
+    """定级订单：目标等级 + 公斤数，试算只给建议，确认后才留料并生成配方草稿。"""
+    __tablename__ = 'grading_order'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True)
+    target_grade: Mapped[str] = mapped_column(String(20))
+    kilograms: Mapped[Decimal] = mapped_column(Numeric(9, 2))
+    note: Mapped[str] = mapped_column(Text)
+    author_id: Mapped[int] = mapped_column(ForeignKey('tea_user.id'))
+    state: Mapped[str] = mapped_column(String(20), index=True, default='tried')
+    suggestion: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    failure: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    recipe_id: Mapped[int | None] = mapped_column(
+        ForeignKey('blend_recipe.id', use_alter=True, name='fk_order_recipe'), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    recipe: Mapped['BlendRecipe | None'] = relationship(foreign_keys=[recipe_id], post_update=True)
+
+
+class LotReservation(Base):
+    """留料台账：held 锁定中、released 撤销退回、consumed 成品封存核销。"""
+    __tablename__ = 'lot_reservation'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lot_id: Mapped[int] = mapped_column(ForeignKey('tea_lot.id'))
+    recipe_id: Mapped[int] = mapped_column(ForeignKey('blend_recipe.id'))
+    order_id: Mapped[int] = mapped_column(ForeignKey('grading_order.id'))
+    kilograms: Mapped[Decimal] = mapped_column(Numeric(9, 2))
+    state: Mapped[str] = mapped_column(String(20), index=True, default='held')
+    author_id: Mapped[int] = mapped_column(ForeignKey('tea_user.id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime)
+    lot: Mapped[TeaLot] = relationship()
+    recipe: Mapped[BlendRecipe] = relationship(back_populates='reservations')
+    __table_args__ = (
+        UniqueConstraint('recipe_id', 'lot_id', name='uq_reservation_recipe_lot'),
+        CheckConstraint('kilograms > 0'),
+    )
 
 
 class ThresholdPolicy(Base):

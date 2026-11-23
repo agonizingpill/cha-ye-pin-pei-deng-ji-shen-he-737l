@@ -3,10 +3,15 @@ export const REVIEW = {queued: '排队计算', failed: '计算失败', repanel: 
   signoff: '待签发', approved: '待成品封存', sealed: '已封存'};
 export const GRADE = {selection: '精选级', standard: '标准级', secondary: '复配级'};
 export const LOT = {awaiting_panel: '待感官评审', awaiting_sample: '待留样', ready: '可用于拼配'};
+export const ORDER = {tried: '已试算待确认', confirmed: '已留料生成草稿', cancelled: '已撤销退料'};
+export const RESERVE = {held: '留料锁定中', released: '已退回余量', consumed: '成品封存已核销'};
 export const SCORES = {aroma: '香气', body: '汤体', sweetness: '回甘', leaf: '叶底', defect: '杂味扣分'};
 
 const key = 'tea-room-session';
-export const store = {session: JSON.parse(sessionStorage.getItem(key) || 'null'), lots: [], blends: [], thresholds: []};
+export const store = {
+  session: JSON.parse(sessionStorage.getItem(key) || 'null'),
+  lots: [], blends: [], thresholds: [], orders: []
+};
 export function setSession(session) {
   store.session = session;
   if (session) sessionStorage.setItem(key, JSON.stringify(session));

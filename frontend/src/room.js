@@ -2,11 +2,13 @@ import {esc, field, formData, formEnd, handle} from './components.js';
 import {load, request, ROLE, setSession, store} from './store.js';
 import {intake, sensory} from './pages/intake.js';
 import {blends} from './pages/blends.js';
+import {orders} from './pages/orders.js';
 import {samples} from './pages/samples.js';
 
 const rooms = {
   lots: {label: '原料批次', render: intake, keys: ['lots']},
   sensory: {label: '感官评审', render: sensory, keys: ['lots']},
+  orders: {label: '定级订单', render: orders, keys: ['lots', 'blends', 'thresholds', 'orders']},
   blends: {label: '拼配审核', render: blends, keys: ['lots', 'blends', 'thresholds']},
   samples: {label: '留样封存', render: samples, keys: ['lots', 'blends']}
 };

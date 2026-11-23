@@ -4,11 +4,11 @@ from sqlalchemy import select
 
 from .constants import ATTRIBUTES, ReviewState
 from .models import SensoryPanel, User
-from .workflow import lot_state, sample_for
+from .workflow import held_total, lot_state, sample_for
 
 
 def iso(when):
-    return when.replace(tzinfo=timezone.utc).isoformat(timespec='seconds')
+    return when.replace(tzinfo=timezone.utc).isoformat(timespec='seconds') if when else None
 
 
 def user_out(user):
@@ -27,8 +27,11 @@ def sample_out(row):
 
 
 def lot_out(row, db):
+    held = held_total(db, row.id)
+    available = row.kilograms - held
     return {'id': row.id, 'code': row.code, 'cultivar': row.cultivar, 'origin': row.origin,
-            'roast': row.roast, 'kilograms': str(row.kilograms), 'received': row.received.isoformat(),
+            'roast': row.roast, 'kilograms': str(row.kilograms), 'held_kg': str(held),
+            'available_kg': str(available), 'received': row.received.isoformat(),
             'state': lot_state(db, row), 'panels': [panel_out(panel, db) for panel in reversed(row.panels)],
             'sample': sample_out(sample_for(db, lot_id=row.id))}
 
@@ -48,12 +51,32 @@ def review_out(row, db):
             'sample': sample_out(sample_for(db, review_id=row.id))}
 
 
+def reservation_out(row, db):
+    return {'id': row.id, 'lot_id': row.lot_id, 'lot_code': row.lot.code,
+            'kilograms': str(row.kilograms), 'state': row.state,
+            'author': db.get(User, row.author_id).name,
+            'created_at': iso(row.created_at), 'released_at': iso(row.released_at)}
+
+
 def recipe_out(row, db):
     return {'id': row.id, 'code': row.code, 'name': row.name, 'revision': row.revision, 'note': row.note,
             'author_id': row.author_id, 'author': db.get(User, row.author_id).name,
+            'order_id': row.order_id,
             'shares': [{'lot_id': share.lot_id, 'code': share.lot.code, 'cultivar': share.lot.cultivar,
                         'percent': str(share.percent), 'lot_state': lot_state(db, share.lot)} for share in row.shares],
+            'reservations': [reservation_out(item, db) for item in row.reservations],
             'review': review_out(row.reviews[-1], db) if row.reviews else None}
+
+
+def order_out(row, db):
+    recipe = row.recipe
+    return {'id': row.id, 'code': row.code, 'target_grade': row.target_grade,
+            'kilograms': str(row.kilograms), 'note': row.note, 'state': row.state,
+            'author': db.get(User, row.author_id).name,
+            'suggestion': row.suggestion, 'failure': row.failure,
+            'recipe_id': row.recipe_id,
+            'recipe_code': recipe.code if recipe else None,
+            'created_at': iso(row.created_at), 'confirmed_at': iso(row.confirmed_at)}
 
 
 def policy_out(row, db):

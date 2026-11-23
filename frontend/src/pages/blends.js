@@ -1,5 +1,5 @@
 import {esc, field, formData, formEnd, handle, header, memo, panelData, panelFields, panelStrip, percent, status} from '../components.js';
-import {GRADE, request, store} from '../store.js';
+import {GRADE, RESERVE, request, store} from '../store.js';
 
 function shareRow(row = {}) {
   return `<div class="share-row"><label>原料批次<select name="lot" required><option value="">选择原料</option>
@@ -63,11 +63,27 @@ function evidence(review) {
     <ul>${review.snapshot.ingredients.map(row => `<li>${esc(row.lot)} · 封签 ${esc(row.seal)} · 审评单 #${row.panel_id}</li>`).join('')}</ul></details></section>`;
 }
 
+function reservationSection(blend) {
+  const rows = blend.reservations || [];
+  if (!rows.length) return '';
+  const held = rows.filter(row => row.state === 'held');
+  return `<section class="reservation-box"><h3>留料台账</h3><ul class="stock-list">
+    ${rows.map(row => `<li><strong>${esc(row.lot_code)}</strong><span>${esc(row.kilograms)} kg</span>
+      <span class="reserve-state ${esc(row.state)}">${RESERVE[row.state] || row.state}</span></li>`).join('')}</ul>
+    ${held.length ? `<p class="muted">留料锁定中，可用余量已扣除；撤销草稿即退回，成品封存后自动核销。</p>` : ''}</section>`;
+}
+
 function reviewActions(blend, user) {
   const {review} = blend;
   const own = user.id === blend.author_id;
-  if (!review) return own ? `<form id="review-action" data-action="submit"><p class="muted">送审后锁定配方、原料评分、封签和阈值版本。</p>
+  if (!review) {
+    if (blend.order_id) {
+      return own ? `<form id="review-action" data-action="submit"><p class="muted">定级订单留料草稿，配比已锁定。送审后冻结评分、封签和阈值版本。</p>
+        ${formEnd('冻结配方并送审', `<button type="button" class="button quiet" id="cancel-draft">撤销留料并退料</button>`)}</form>` : '';
+    }
+    return own ? `<form id="review-action" data-action="submit"><p class="muted">送审后锁定配方、原料评分、封签和阈值版本。</p>
     ${formEnd('冻结配方并送审', `<a class="button quiet" href="#/blends/edit-${blend.id}">修订配比</a>`)}</form>` : '';
+  }
   const state = review.state;
   if (state === 'approved') return `<a class="button" href="#/samples/blend-${blend.id}">登记成品留样 →</a>`;
   if (state === 'repanel' && user.role === 'operator' && !own) return `<form id="review-action" data-action="repanel" class="form-stack">
@@ -89,6 +105,7 @@ function blendDetail(blend) {
     <div class="ratio-band" aria-hidden="true">${blend.shares.map(row => `<div style="flex:${Number(row.percent)}"></div>`).join('')}</div>
     <ul>${blend.shares.map(row => `<li><strong>${esc(row.cultivar)}</strong><a href="#/lots/${row.lot_id}">${esc(row.code)}</a>
       <span>${esc(row.percent)}%</span>${!review ? status(row.lot_state) : ''}</li>`).join('')}</ul></section>
+    ${reservationSection(blend)}
     ${review ? `${evidence(review)}${review.repanel ? `<section><h3>独立复评 · ${esc(review.repanel.author)}</h3>
       ${panelStrip(review.repanel)}<blockquote>${esc(review.repanel.note)}</blockquote><p>${GRADE[review.repanel.grade]}</p></section>` : ''}
       ${review.verified_by ? `<p class="muted">初审 ${esc(review.verified_by)}${review.signed_by ? ` · 主管 ${esc(review.signed_by)}` : ''}</p>` : ''}
@@ -112,16 +129,34 @@ export function blends(root, id, refresh) {
   const user = store.session.user;
   if (id === 'policy') return policy(root, refresh);
   const edit = typeof id === 'string' && id.startsWith('edit-') ? store.blends.find(row => row.id === Number(id.slice(5))) : null;
+  if (edit?.order_id) {
+    location.hash = `#/blends/${edit.id}`;
+    refresh('定级订单留料草稿的配比已锁定，不能直接修订；可撤销后重新试算。');
+    return;
+  }
   if (user.role === 'operator' && (id === 'new' || edit?.author_id === user.id && !edit.review)) return editor(edit, root, refresh);
   const selected = store.blends.find(row => row.id === id) || store.blends[0];
   root.innerHTML = `${header('拼配等级审核', '查看配方组成、盲复评队列及双人签发记录。', `<div class="header-actions">
     <a class="button quiet" href="#/blends/policy">阈值版本</a>${user.role === 'operator' ? '<a class="button" href="#/blends/new">新建拼配</a>' : ''}</div>`)}
     <div class="review-grid"><aside class="paper review-index"><h2>拼配台账</h2><ul>${store.blends.map(row =>
-      `<li><a class="${row.id === selected?.id ? 'active' : ''}" href="#/blends/${row.id}"><span><small>${esc(row.code)}</small>
+      `<li><a class="${row.id === selected?.id ? 'active' : ''}" href="#/blends/${row.id}"><span><small>${esc(row.code)}${row.order_id ? ' · 定级订单' : ''}</small>
       <strong>${esc(row.name)}</strong></span>${status(row.review?.state)}</a></li>`).join('') || '<li class="empty">新建首个拼配配方。</li>'}</ul></aside>
     ${selected ? blendDetail(selected) : ''}</div>`;
   const action = root.querySelector('#review-action');
   if (!action) return;
+  const cancelButton = root.querySelector('#cancel-draft');
+  if (cancelButton) {
+    cancelButton.addEventListener('click', async event => {
+      event.preventDefault();
+      if (!window.confirm('撤销后该草稿锁定的各批留料将全部退回可用余量，确认撤销？')) return;
+      try {
+        await request(`/blends/${selected.id}/cancel`, {});
+        refresh('草稿已撤销，留料已退回。');
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  }
   handle(action, form => {
     const kind = form.dataset.action;
     if (kind === 'submit') return request(`/blends/${selected.id}/review`, {});
